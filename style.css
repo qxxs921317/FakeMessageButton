@@ -1,0 +1,44 @@
+#fakemsg-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    flex: 0 0 24px;
+    margin-right: 6px;
+    cursor: pointer;
+    border-radius: 5px;
+    opacity: 0.85;
+    transition: opacity 0.15s ease, background 0.15s ease, width 0.1s ease, height 0.1s ease;
+}
+
+#fakemsg-btn:hover {
+    opacity: 1;
+    background: rgba(255, 255, 255, 0.08);
+}
+
+#fakemsg-btn:active {
+    transform: scale(0.92);
+}
+
+#fakemsg-btn #fakemsg-icon {
+    font-size: 0.85em;
+    line-height: 1;
+    filter: drop-shadow(0 0 2px rgba(0, 0, 0, 0.35));
+}
+
+.fakemsg-settings-block .inline-drawer-content label {
+    display: block;
+    margin-top: 8px;
+    margin-bottom: 2px;
+}
+
+.fakemsg-settings-block .inline-drawer-content input.text_pole {
+    width: 8em;
+}
+
+.fakemsg-settings-block .inline-drawer-content small {
+    display: block;
+    margin-top: 10px;
+    opacity: 0.75;
+}

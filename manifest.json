@@ -1,0 +1,12 @@
+{
+  "display_name": "주작버튼 💉",
+  "loading_order": 999,
+  "requires": [],
+  "optional": [],
+  "js": "index.js",
+  "css": "style.css",
+  "author": "Jinhee",
+  "version": "1.0.0",
+  "homePage": "",
+  "auto_update": false
+}
