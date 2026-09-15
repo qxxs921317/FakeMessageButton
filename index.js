@@ -104,6 +104,7 @@ function pushHistory(text) {
     }
     cycleIndex = 0;
     persistHistory();
+    refreshHistoryCount();
 }
 
 /**
@@ -364,6 +365,17 @@ function applyButtonStyle() {
 
     $(`#${SEND_BTN_ID}`).toggle(!!config.showSendButton);
     $(`#${RECOVER_BTN_ID}`).toggle(!!config.showRecoverButton);
+
+    // 설정 패널 미리보기도 같이 갱신
+    $("#fakemsg-preview-fake").text(config.emoji);
+    $("#fakemsg-preview-send").text(config.sendEmoji).toggle(!!config.showSendButton);
+    $("#fakemsg-preview-recover").text(config.recoverEmoji).toggle(!!config.showRecoverButton);
+    $("#fakemsg-preview .fm-preview-btn").css({
+        width: `${config.iconSize}px`,
+        height: `${config.iconSize}px`,
+        fontSize: `${config.iconSize * 0.55}px`,
+        marginRight: `${config.iconMarginRight}px`,
+    });
 }
 
 function buildButton() {
@@ -399,8 +411,18 @@ function buildButton() {
 
 // ---------- 설정 패널 ----------
 
+function refreshHistoryCount() {
+    const $el = $("#fakemsg-history-count");
+    if (!$el.length) return;
+    $el.text(`${history.length}개`);
+    $el.toggleClass("fm-badge-empty", history.length === 0);
+}
+
 function buildSettingsPanel() {
     const config = getConfig();
+
+    const sw = (id, checked) =>
+        `<label class="fm-switch"><input id="${id}" type="checkbox" ${checked ? "checked" : ""}><span class="fm-slider"></span></label>`;
 
     const html = `
     <div class="fakemsg-settings-block">
@@ -409,50 +431,93 @@ function buildSettingsPanel() {
                 <b>💉 주작버튼</b>
                 <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
             </div>
-            <div class="inline-drawer-content">
-                <label for="fakemsg-emoji-input">주작 버튼 아이콘</label>
-                <input id="fakemsg-emoji-input" class="text_pole" type="text" maxlength="10" value="${config.emoji}">
+            <div class="inline-drawer-content fm-root">
 
-                <label for="fakemsg-send-emoji-input">심플전송 버튼 아이콘</label>
-                <input id="fakemsg-send-emoji-input" class="text_pole" type="text" maxlength="10" value="${config.sendEmoji}">
-
-                <label for="fakemsg-recover-emoji-input">인풋복구 버튼 아이콘</label>
-                <input id="fakemsg-recover-emoji-input" class="text_pole" type="text" maxlength="10" value="${config.recoverEmoji}">
-
-                <label for="fakemsg-icon-size-input">아이콘 크기 (px)</label>
-                <input id="fakemsg-icon-size-input" class="text_pole" type="number" min="12" max="64" step="1" value="${config.iconSize}">
-
-                <label for="fakemsg-icon-margin-input">오른쪽 여백 (px)</label>
-                <input id="fakemsg-icon-margin-input" class="text_pole" type="number" min="0" max="40" step="1" value="${config.iconMarginRight}">
-
-                <label class="checkbox_label" for="fakemsg-clear-input">
-                    <input id="fakemsg-clear-input" type="checkbox" ${config.clearInput ? "checked" : ""}>
-                    <span>삽입 후 입력창 비우기</span>
-                </label>
-
-                <label class="checkbox_label" for="fakemsg-show-send">
-                    <input id="fakemsg-show-send" type="checkbox" ${config.showSendButton ? "checked" : ""}>
-                    <span>심플전송 버튼 표시</span>
-                </label>
-
-                <label class="checkbox_label" for="fakemsg-show-recover">
-                    <input id="fakemsg-show-recover" type="checkbox" ${config.showRecoverButton ? "checked" : ""}>
-                    <span>인풋복구 버튼 표시</span>
-                </label>
-
-                <label for="fakemsg-history-limit">인풋 기록 보관 개수</label>
-                <input id="fakemsg-history-limit" class="text_pole" type="number" min="1" max="100" step="1" value="${config.historyLimit}">
-
-                <label for="fakemsg-min-length">기록 최소 글자수</label>
-                <input id="fakemsg-min-length" class="text_pole" type="number" min="1" max="200" step="1" value="${config.minLength}">
-
-                <div style="margin-top:10px;">
-                    <span id="fakemsg-history-count" class="fakemsg-count"></span>
-                    <input id="fakemsg-clear-history" class="menu_button" type="button" value="기록 비우기">
+                <div id="fakemsg-preview" class="fm-preview">
+                    <span class="fm-preview-label">미리보기</span>
+                    <div class="fm-preview-bar">
+                        <span id="fakemsg-preview-recover" class="fm-preview-btn"></span>
+                        <span id="fakemsg-preview-send" class="fm-preview-btn"></span>
+                        <span id="fakemsg-preview-fake" class="fm-preview-btn"></span>
+                        <span class="fm-preview-input"></span>
+                        <span class="fm-preview-send"><i class="fa-solid fa-paper-plane"></i></span>
+                    </div>
                 </div>
 
-                <small>💉 캐릭터 메시지 삽입 / 📨 유저 메시지만 삽입(AI 응답 없음) / ↩️ 날아간 입력 복구.<br>
-                입력창은 0.5초마다 자동 스냅샷돼서 <b>그냥 타이핑한 내용도 기록</b>되고, 다른 확장이 입력창을 덮어써도 직전 값이 남습니다. 기록은 브라우저에 저장되어 새로고침해도 유지돼요. ↩️를 연타하면 기록을 차례로 순환합니다.</small>
+                <div class="fm-sec">
+                    <div class="fm-sec-title">버튼</div>
+
+                    <div class="fm-row">
+                        <span class="fm-label">주작<small>캐릭터 메시지로 삽입</small></span>
+                        <input id="fakemsg-emoji-input" class="text_pole fm-emoji" type="text" maxlength="10" value="${config.emoji}">
+                        <span class="fm-always" title="항상 표시됩니다">●</span>
+                    </div>
+
+                    <div class="fm-row">
+                        <span class="fm-label">심플전송<small>유저 메시지만, AI 응답 없음</small></span>
+                        <input id="fakemsg-send-emoji-input" class="text_pole fm-emoji" type="text" maxlength="10" value="${config.sendEmoji}">
+                        ${sw("fakemsg-show-send", config.showSendButton)}
+                    </div>
+
+                    <div class="fm-row">
+                        <span class="fm-label">인풋복구<small>날아간 입력 되살리기</small></span>
+                        <input id="fakemsg-recover-emoji-input" class="text_pole fm-emoji" type="text" maxlength="10" value="${config.recoverEmoji}">
+                        ${sw("fakemsg-show-recover", config.showRecoverButton)}
+                    </div>
+                </div>
+
+                <div class="fm-sec">
+                    <div class="fm-sec-title">모양 &amp; 동작</div>
+
+                    <div class="fm-row">
+                        <span class="fm-label">아이콘 크기</span>
+                        <div class="fm-ctl">
+                            <input id="fakemsg-icon-size-range" class="fm-range" type="range" min="12" max="64" step="1" value="${config.iconSize}">
+                            <input id="fakemsg-icon-size-input" class="text_pole fm-num" type="number" min="12" max="64" step="1" value="${config.iconSize}">
+                        </div>
+                    </div>
+
+                    <div class="fm-row">
+                        <span class="fm-label">오른쪽 여백</span>
+                        <div class="fm-ctl">
+                            <input id="fakemsg-icon-margin-range" class="fm-range" type="range" min="0" max="40" step="1" value="${config.iconMarginRight}">
+                            <input id="fakemsg-icon-margin-input" class="text_pole fm-num" type="number" min="0" max="40" step="1" value="${config.iconMarginRight}">
+                        </div>
+                    </div>
+
+                    <div class="fm-row">
+                        <span class="fm-label">삽입 후 입력창 비우기</span>
+                        ${sw("fakemsg-clear-input", config.clearInput)}
+                    </div>
+                </div>
+
+                <div class="fm-sec">
+                    <div class="fm-sec-title">
+                        인풋 기록
+                        <span id="fakemsg-history-count" class="fm-badge">0개</span>
+                    </div>
+
+                    <div class="fm-row">
+                        <span class="fm-label">보관 개수</span>
+                        <input id="fakemsg-history-limit" class="text_pole fm-num" type="number" min="1" max="100" step="1" value="${config.historyLimit}">
+                    </div>
+
+                    <div class="fm-row">
+                        <span class="fm-label">기록 최소 글자수<small>이보다 짧으면 저장 안 함</small></span>
+                        <input id="fakemsg-min-length" class="text_pole fm-num" type="number" min="1" max="200" step="1" value="${config.minLength}">
+                    </div>
+
+                    <div class="fm-row fm-row-end">
+                        <input id="fakemsg-clear-history" class="menu_button fm-danger" type="button" value="기록 비우기">
+                    </div>
+                </div>
+
+                <details class="fm-help">
+                    <summary>사용법</summary>
+                    <p>입력창은 0.5초마다 자동 스냅샷돼서 <b>그냥 타이핑한 내용도 기록</b>되고, 다른 확장이 입력창을 덮어써도 직전 값이 남습니다.</p>
+                    <p>기록은 브라우저에 저장되어 <b>새로고침해도 유지</b>돼요. 복구 버튼을 연타하면 기록을 차례로 순환합니다.</p>
+                </details>
+
             </div>
         </div>
     </div>
@@ -461,12 +526,9 @@ function buildSettingsPanel() {
     const $target = $("#extensions_settings2").length ? $("#extensions_settings2") : $("#extensions_settings");
     $target.append(html);
 
-    function refreshCount() {
-        $("#fakemsg-history-count").text(`저장된 기록: ${history.length}개  `);
-    }
-    refreshCount();
-    setInterval(refreshCount, 3000);
+    refreshHistoryCount();
 
+    // --- 이모지 입력 ---
     const bindEmoji = (sel, key, fallback) => {
         $(sel).on("input", function () {
             getConfig()[key] = $(this).val().trim() || fallback;
@@ -478,6 +540,7 @@ function buildSettingsPanel() {
     bindEmoji("#fakemsg-send-emoji-input", "sendEmoji", DEFAULT_CONFIG.sendEmoji);
     bindEmoji("#fakemsg-recover-emoji-input", "recoverEmoji", DEFAULT_CONFIG.recoverEmoji);
 
+    // --- 숫자 입력 ---
     const bindNumber = (sel, key, min, max) => {
         $(sel).on("input", function () {
             let val = parseInt($(this).val(), 10);
@@ -493,6 +556,24 @@ function buildSettingsPanel() {
     bindNumber("#fakemsg-history-limit", "historyLimit", 1, 100);
     bindNumber("#fakemsg-min-length", "minLength", 1, 200);
 
+    // --- 슬라이더 ↔ 숫자 동기화 ---
+    const linkRange = (rangeSel, numSel, key, min, max) => {
+        $(rangeSel).on("input", function () {
+            const val = Math.min(max, Math.max(min, parseInt($(this).val(), 10)));
+            $(numSel).val(val);
+            getConfig()[key] = val;
+            saveConfig();
+            applyButtonStyle();
+        });
+        $(numSel).on("input", function () {
+            const val = parseInt($(this).val(), 10);
+            if (!isNaN(val)) $(rangeSel).val(Math.min(max, Math.max(min, val)));
+        });
+    };
+    linkRange("#fakemsg-icon-size-range", "#fakemsg-icon-size-input", "iconSize", 12, 64);
+    linkRange("#fakemsg-icon-margin-range", "#fakemsg-icon-margin-input", "iconMarginRight", 0, 40);
+
+    // --- 토글 ---
     const bindCheck = (sel, key) => {
         $(sel).on("change", function () {
             getConfig()[key] = $(this).prop("checked");
@@ -508,9 +589,11 @@ function buildSettingsPanel() {
         history = [];
         cycleIndex = 0;
         persistHistory();
-        refreshCount();
+        refreshHistoryCount();
         toastr?.info?.("인풋 기록을 비웠어요.", "주작버튼");
     });
+
+    applyButtonStyle();
 }
 
 // ---------- 초기화 ----------
