@@ -191,6 +191,14 @@
     height: auto;
 }
 
+.fakemsg-settings-block select.fm-select {
+    width: auto !important;
+    flex: 0 0 auto;
+    padding: 3px 6px;
+    height: auto;
+    cursor: pointer;
+}
+
 .fakemsg-settings-block .fm-range {
     width: 96px;
     flex: 0 0 auto;
@@ -272,6 +280,7 @@
     background: var(--fm-accent);
     color: #111;
     opacity: 0.85;
+    cursor: default;
 }
 
 .fakemsg-settings-block .fm-badge.fm-badge-empty {

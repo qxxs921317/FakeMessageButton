@@ -10,7 +10,8 @@ const SEND_ICON_ID = "fakemsg-send-icon";
 const RECOVER_BTN_ID = "fakemsg-recover-btn";
 const RECOVER_ICON_ID = "fakemsg-recover-icon";
 
-const STORAGE_KEY = "fakemsg_input_history_v1";
+const STORAGE_KEY = "fakemsg_input_history_v2";
+const STORAGE_KEY_LEGACY = "fakemsg_input_history_v1";
 
 const DEFAULT_CONFIG = {
     emoji: "💉",
@@ -25,8 +26,9 @@ const DEFAULT_CONFIG = {
     // 인풋 복구
     showRecoverButton: true,
     recoverEmoji: "↩️",
-    historyLimit: 20,   // 보관 개수
-    minLength: 8,       // 이 길이 미만은 기록 안 함
+    historyLimit: 20,       // 보관 개수
+    minLength: 8,           // 이 길이 미만은 기록 안 함
+    sentPolicy: "demote",   // demote | delete | keep
 };
 
 // ---------- 설정 헬퍼 ----------
@@ -45,86 +47,216 @@ function saveConfig() {
 
 // ============================================================
 //  인풋 기록 / 복구
+//
+//  기록 1건 = { t: 본문, s: 전송여부(bool), d: 기록시각(ms) }
+//  배열 순서가 곧 복구 순환 순서. [0] 이 가장 먼저 나온다.
 // ============================================================
 
-let history = [];         // [0] 이 가장 최근
-let cycleIndex = 0;       // 복구 버튼 연타 시 순환 위치
-let lastValue = "";       // 직전 폴링 때의 입력창 값
-let stableTicks = 0;      // 값이 몇 틱째 안 바뀌고 있는지
+let history = [];
+let cycleIndex = 0;        // 다음에 꺼낼 위치
+let cycleActive = false;   // 복구 순환 중인가
+let suppressSnapshot = false; // 우리가 방금 입력창을 바꿨으니 폴링은 무시하라
+
+let lastValue = "";        // 직전 폴링 때의 입력창 값
+let stableTicks = 0;       // 값이 몇 틱째 안 바뀌고 있는지
 let pollTimer = null;
 
-const POLL_MS = 500;      // 폴링 주기
-const STABLE_TICKS = 2;   // 이만큼 유지되면 "타이핑 멈춤" 으로 보고 스냅샷
+const POLL_MS = 500;           // 폴링 주기
+const STABLE_TICKS = 2;        // 이만큼 유지되면 "타이핑 멈춤" 으로 보고 스냅샷
+const PERSIST_DELAY = 1500;    // localStorage 쓰기 합치는 간격
+const MAX_BYTES = 256 * 1024;  // 기록 전체 용량 상한
+
+// ---------- 저장 / 로드 ----------
+
+let persistTimer = null;
+
+function persistHistory() {
+    // 여러 번 호출돼도 실제 쓰기는 한 번으로 합침 (동기 직렬화로 인한 끊김 방지)
+    if (persistTimer) return;
+    persistTimer = setTimeout(() => {
+        persistTimer = null;
+        flushHistory();
+    }, PERSIST_DELAY);
+}
+
+function flushHistory() {
+    try {
+        let payload = JSON.stringify(history);
+        // 용량 상한 초과 시 뒤쪽(오래된/전송된 것)부터 잘라냄
+        while (payload.length > MAX_BYTES && history.length > 1) {
+            history.pop();
+            payload = JSON.stringify(history);
+        }
+        localStorage.setItem(STORAGE_KEY, payload);
+    } catch (e) {
+        // 용량 초과 등 — 조용히 무시 (메모리 기록은 계속 동작)
+        console.warn("[주작버튼] 인풋 기록 저장 실패:", e);
+    }
+}
 
 function loadHistory() {
     try {
         const raw = localStorage.getItem(STORAGE_KEY);
         if (raw) {
             const parsed = JSON.parse(raw);
-            if (Array.isArray(parsed)) history = parsed.filter(v => typeof v === "string");
+            if (Array.isArray(parsed)) {
+                history = parsed
+                    .filter(v => v && typeof v.t === "string")
+                    .map(v => ({ t: v.t, s: !!v.s, d: v.d || 0 }));
+                return;
+            }
+        }
+        // v1(문자열 배열) 마이그레이션
+        const legacy = localStorage.getItem(STORAGE_KEY_LEGACY);
+        if (legacy) {
+            const parsed = JSON.parse(legacy);
+            if (Array.isArray(parsed)) {
+                history = parsed
+                    .filter(v => typeof v === "string")
+                    .map(t => ({ t, s: false, d: 0 }));
+                flushHistory();
+            }
         }
     } catch (e) {
         console.warn("[주작버튼] 인풋 기록 로드 실패:", e);
     }
 }
 
-function persistHistory() {
-    try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(history));
-    } catch (e) {
-        // 용량 초과 등 — 조용히 무시 (메모리 기록은 계속 동작)
+// ---------- 기록 추가 ----------
+
+function trimHistory() {
+    const limit = getConfig().historyLimit;
+    if (history.length <= limit) return;
+    // 넘치면 전송된 것부터 버리고, 그래도 넘치면 오래된 것부터 버림
+    for (let i = history.length - 1; i >= 0 && history.length > limit; i--) {
+        if (history[i].s) history.splice(i, 1);
     }
+    if (history.length > limit) history.length = limit;
 }
 
 /**
  * 입력값을 기록에 넣는다.
  * - 너무 짧으면 무시
  * - 맨 위 항목과 같으면 무시
- * - 맨 위 항목과 "이어 쓰는 관계"(한쪽이 다른 쪽의 앞부분)면 덮어쓰기
+ * - 맨 위 항목(미전송)과 "이어 쓰는 관계"(한쪽이 다른 쪽의 앞부분)면 덮어쓰기
  *   → 타이핑 중간 상태가 기록을 도배하지 않게 함
+ *
+ * @param {boolean} resetCycle 순환 위치를 처음으로 되돌릴지. 복구 중에는 false.
  */
-function pushHistory(text) {
+function pushHistory(text, resetCycle = true) {
     const config = getConfig();
     const t = String(text ?? "");
     if (t.trim().length < config.minLength) return;
 
-    if (history[0] === t) {
-        cycleIndex = 0;
+    const head = history[0];
+
+    if (head && head.t === t) {
+        if (resetCycle) cycleIndex = 0;
         return;
     }
 
-    if (history[0] && (t.startsWith(history[0]) || history[0].startsWith(t))) {
-        history[0] = t;
+    // 이미 같은 내용이 뒤쪽에 있으면 그걸 앞으로 끌어올림 (중복 누적 방지)
+    const dupIdx = history.findIndex(h => h.t === t);
+    if (dupIdx > 0) {
+        const [item] = history.splice(dupIdx, 1);
+        item.s = false;
+        item.d = Date.now();
+        history.unshift(item);
+    } else if (head && !head.s && (t.startsWith(head.t) || head.t.startsWith(t))) {
+        head.t = t;
+        head.d = Date.now();
     } else {
-        history.unshift(t);
+        history.unshift({ t, s: false, d: Date.now() });
     }
 
-    if (history.length > config.historyLimit) {
-        history.length = config.historyLimit;
-    }
-    cycleIndex = 0;
+    trimHistory();
+    if (resetCycle) cycleIndex = 0;
     persistHistory();
     refreshHistoryCount();
 }
 
+// ---------- 전송된 입력 처리 ----------
+
+/**
+ * 채팅에 무사히 들어간 입력을 기록에서 어떻게 다룰지.
+ *  demote : 전송 표시 후 맨 뒤로 → 복구 시 미전송 것부터 나옴 (기본)
+ *  delete : 기록에서 제거
+ *  keep   : 아무것도 안 함
+ * 본문이 정확히 일치하지 않으면 아무 일도 일어나지 않음 (안전 실패).
+ */
+function markAsSent(text) {
+    const policy = getConfig().sentPolicy;
+    if (policy === "keep") return;
+
+    const t = String(text ?? "").trim();
+    if (!t) return;
+
+    const idx = history.findIndex(h => h.t === t || h.t.trim() === t);
+    if (idx === -1) return; // 매칭 실패 → 기록은 그대로 둔다
+
+    if (policy === "delete") {
+        history.splice(idx, 1);
+    } else {
+        const [item] = history.splice(idx, 1);
+        item.s = true;
+        history.push(item);
+    }
+
+    cycleIndex = 0;
+    cycleActive = false;
+    persistHistory();
+    refreshHistoryCount();
+}
+
+// ---------- 복구 ----------
+
 /**
  * 현재 입력창 값과 다른, 다음 복구 후보를 반환.
- * 계속 누르면 기록을 순환한다.
+ * cycleIndex 를 리셋하지 않으므로 연타하면 기록 전체를 한 바퀴 돈다.
  */
 function getNextRecoverable(currentInput = "") {
-    if (!history.length) return "";
+    if (!history.length) return null;
     const cur = String(currentInput ?? "");
 
     for (let offset = 0; offset < history.length; offset++) {
         const idx = (cycleIndex + offset) % history.length;
-        const candidate = history[idx];
-        if (candidate !== cur) {
+        const item = history[idx];
+        if (item.t !== cur) {
             cycleIndex = (idx + 1) % history.length;
-            return candidate;
+            return { item, idx };
         }
     }
-    return "";
+    return null;
 }
+
+function recoverInput() {
+    const ta = document.getElementById("send_textarea");
+    if (!ta) return;
+
+    // 순환을 "시작"할 때만 현재 입력을 보존한다.
+    // 연타 중에 매번 넣으면 기록이 오염되고 순환 위치가 리셋돼 2개만 왕복하게 됨.
+    if (!cycleActive) {
+        pushHistory(ta.value ?? "", true);
+        cycleActive = true;
+    }
+
+    const next = getNextRecoverable(ta.value ?? "");
+    if (!next) {
+        toastr?.info?.("복구할 기록이 없어요.", "주작버튼");
+        return;
+    }
+
+    suppressSnapshot = true;   // 폴링이 이 값을 다시 집어넣지 않도록
+    ta.value = next.item.t;
+    ta.dispatchEvent(new Event("input", { bubbles: true }));
+    lastValue = next.item.t;
+    stableTicks = 0;
+
+    const tag = next.item.s ? " · 전송됨" : "";
+    toastr?.success?.(`인풋 복구 (${next.idx + 1}/${history.length}${tag})`, "주작버튼");
+}
+
+// ---------- 입력창 감시 ----------
 
 /**
  * 폴링 루프.
@@ -138,11 +270,15 @@ function tick() {
     const cur = ta.value ?? "";
 
     if (cur === lastValue) {
+        if (suppressSnapshot) return;   // 복구로 넣은 값은 다시 기록하지 않음
         stableTicks++;
-        // 타이핑이 멈춘 시점에 한 번만 스냅샷
         if (stableTicks === STABLE_TICKS) pushHistory(cur);
         return;
     }
+
+    // 사용자가 직접 손댐 → 복구 순환 종료
+    suppressSnapshot = false;
+    cycleActive = false;
 
     // 값이 급격히 줄었다 = 지워졌거나 덮어써졌다 → 줄어들기 직전 값을 즉시 보존
     if (lastValue.trim().length >= getConfig().minLength &&
@@ -159,34 +295,16 @@ function startWatching() {
     const ta = document.getElementById("send_textarea");
     lastValue = ta ? (ta.value ?? "") : "";
     pollTimer = setInterval(tick, POLL_MS);
+
+    // 페이지를 떠날 때 대기 중인 쓰기를 확실히 반영
+    window.addEventListener("pagehide", flushHistory);
+    window.addEventListener("beforeunload", flushHistory);
 }
 
 /** 입력창을 비우기 직전에 호출 — 확실하게 기록에 남긴다 */
 function snapshotNow() {
     const ta = document.getElementById("send_textarea");
     if (ta) pushHistory(ta.value ?? "");
-}
-
-function recoverInput() {
-    const ta = document.getElementById("send_textarea");
-    if (!ta) return;
-
-    // 지금 쓰고 있던 것도 잃지 않도록 먼저 보존
-    pushHistory(ta.value ?? "");
-
-    const prev = getNextRecoverable(ta.value ?? "");
-    if (!prev) {
-        toastr?.info?.("복구할 기록이 없어요.", "주작버튼");
-        return;
-    }
-
-    ta.value = prev;
-    ta.dispatchEvent(new Event("input", { bubbles: true }));
-    lastValue = prev;
-    stableTicks = 0;
-
-    const pos = cycleIndex === 0 ? history.length : cycleIndex;
-    toastr?.success?.(`인풋 복구 (${pos}/${history.length})`, "주작버튼");
 }
 
 // ---------- 캐릭터 정보 조회 ----------
@@ -262,6 +380,8 @@ function clearInputIfNeeded($textarea) {
         $textarea.val("").trigger("input");
         lastValue = "";
         stableTicks = 0;
+        suppressSnapshot = false;
+        cycleActive = false;
     }
 }
 
@@ -301,6 +421,7 @@ async function injectCharacterMessage() {
         }
 
         await pushMessage(message, false);
+        markAsSent(text);
         clearInputIfNeeded($textarea);
 
         console.log(`[주작버튼] 캐릭터 메시지 삽입됨 (${charName}, len=${text.length})`);
@@ -343,6 +464,24 @@ async function simpleSend() {
         toastr?.error?.("전송에 실패했어요. 콘솔을 확인해주세요.", "주작버튼");
     } finally {
         isSending = false;
+    }
+}
+
+// ---------- 전송 감지 ----------
+
+function hookSendEvents() {
+    try {
+        const { eventSource, eventTypes, chat } = getContext();
+        if (!eventSource || !eventTypes) return;
+
+        eventSource.on(eventTypes.MESSAGE_SENT, (idx) => {
+            try {
+                const msg = getContext().chat?.[idx];
+                if (msg?.mes) markAsSent(msg.mes);
+            } catch (e) { /* noop */ }
+        });
+    } catch (e) {
+        console.warn("[주작버튼] 전송 이벤트 연결 실패:", e);
     }
 }
 
@@ -414,7 +553,10 @@ function buildButton() {
 function refreshHistoryCount() {
     const $el = $("#fakemsg-history-count");
     if (!$el.length) return;
-    $el.text(`${history.length}개`);
+    const unsent = history.filter(h => !h.s).length;
+    const sent = history.length - unsent;
+    $el.text(sent > 0 ? `${unsent} + ${sent}` : `${unsent}개`);
+    $el.attr("title", `미전송 ${unsent}개 / 전송됨 ${sent}개`);
     $el.toggleClass("fm-badge-empty", history.length === 0);
 }
 
@@ -423,6 +565,8 @@ function buildSettingsPanel() {
 
     const sw = (id, checked) =>
         `<label class="fm-switch"><input id="${id}" type="checkbox" ${checked ? "checked" : ""}><span class="fm-slider"></span></label>`;
+
+    const sel = (v) => config.sentPolicy === v ? "selected" : "";
 
     const html = `
     <div class="fakemsg-settings-block">
@@ -498,6 +642,15 @@ function buildSettingsPanel() {
                     </div>
 
                     <div class="fm-row">
+                        <span class="fm-label">전송된 입력 처리<small id="fakemsg-policy-desc"></small></span>
+                        <select id="fakemsg-sent-policy" class="text_pole fm-select">
+                            <option value="demote" ${sel("demote")}>뒤로 밀기</option>
+                            <option value="delete" ${sel("delete")}>삭제</option>
+                            <option value="keep" ${sel("keep")}>그대로</option>
+                        </select>
+                    </div>
+
+                    <div class="fm-row">
                         <span class="fm-label">보관 개수</span>
                         <input id="fakemsg-history-limit" class="text_pole fm-num" type="number" min="1" max="100" step="1" value="${config.historyLimit}">
                     </div>
@@ -515,7 +668,8 @@ function buildSettingsPanel() {
                 <details class="fm-help">
                     <summary>사용법</summary>
                     <p>입력창은 0.5초마다 자동 스냅샷돼서 <b>그냥 타이핑한 내용도 기록</b>되고, 다른 확장이 입력창을 덮어써도 직전 값이 남습니다.</p>
-                    <p>기록은 브라우저에 저장되어 <b>새로고침해도 유지</b>돼요. 복구 버튼을 연타하면 기록을 차례로 순환합니다.</p>
+                    <p>기록은 브라우저에 저장되어 <b>새로고침해도 유지</b>돼요. 복구 버튼을 연타하면 기록 전체를 한 바퀴 순환합니다.</p>
+                    <p>뱃지의 <b>미전송 + 전송됨</b> 숫자는 각각 아직 채팅에 안 들어간 입력과 이미 들어간 입력의 개수예요.</p>
                 </details>
 
             </div>
@@ -527,10 +681,11 @@ function buildSettingsPanel() {
     $target.append(html);
 
     refreshHistoryCount();
+    refreshPolicyDesc();
 
     // --- 이모지 입력 ---
-    const bindEmoji = (sel, key, fallback) => {
-        $(sel).on("input", function () {
+    const bindEmoji = (selq, key, fallback) => {
+        $(selq).on("input", function () {
             getConfig()[key] = $(this).val().trim() || fallback;
             saveConfig();
             applyButtonStyle();
@@ -541,19 +696,24 @@ function buildSettingsPanel() {
     bindEmoji("#fakemsg-recover-emoji-input", "recoverEmoji", DEFAULT_CONFIG.recoverEmoji);
 
     // --- 숫자 입력 ---
-    const bindNumber = (sel, key, min, max) => {
-        $(sel).on("input", function () {
+    const bindNumber = (selq, key, min, max, after) => {
+        $(selq).on("input", function () {
             let val = parseInt($(this).val(), 10);
             if (isNaN(val)) return;
             val = Math.min(max, Math.max(min, val));
             getConfig()[key] = val;
             saveConfig();
             applyButtonStyle();
+            if (after) after();
         });
     };
     bindNumber("#fakemsg-icon-size-input", "iconSize", 12, 64);
     bindNumber("#fakemsg-icon-margin-input", "iconMarginRight", 0, 40);
-    bindNumber("#fakemsg-history-limit", "historyLimit", 1, 100);
+    bindNumber("#fakemsg-history-limit", "historyLimit", 1, 100, () => {
+        trimHistory();
+        persistHistory();
+        refreshHistoryCount();
+    });
     bindNumber("#fakemsg-min-length", "minLength", 1, 200);
 
     // --- 슬라이더 ↔ 숫자 동기화 ---
@@ -574,8 +734,8 @@ function buildSettingsPanel() {
     linkRange("#fakemsg-icon-margin-range", "#fakemsg-icon-margin-input", "iconMarginRight", 0, 40);
 
     // --- 토글 ---
-    const bindCheck = (sel, key) => {
-        $(sel).on("change", function () {
+    const bindCheck = (selq, key) => {
+        $(selq).on("change", function () {
             getConfig()[key] = $(this).prop("checked");
             saveConfig();
             applyButtonStyle();
@@ -585,15 +745,32 @@ function buildSettingsPanel() {
     bindCheck("#fakemsg-show-send", "showSendButton");
     bindCheck("#fakemsg-show-recover", "showRecoverButton");
 
+    // --- 전송된 입력 처리 ---
+    $("#fakemsg-sent-policy").on("change", function () {
+        getConfig().sentPolicy = $(this).val();
+        saveConfig();
+        refreshPolicyDesc();
+    });
+
     $("#fakemsg-clear-history").on("click", function () {
         history = [];
         cycleIndex = 0;
-        persistHistory();
+        cycleActive = false;
+        flushHistory();
         refreshHistoryCount();
         toastr?.info?.("인풋 기록을 비웠어요.", "주작버튼");
     });
 
     applyButtonStyle();
+}
+
+function refreshPolicyDesc() {
+    const desc = {
+        demote: "채팅에 들어간 건 순환 맨 뒤로 — 안 보낸 것부터 나옴",
+        delete: "채팅에 들어간 건 기록에서 제거",
+        keep: "전송 여부와 상관없이 그대로 둠",
+    };
+    $("#fakemsg-policy-desc").text(desc[getConfig().sentPolicy] || "");
 }
 
 // ---------- 초기화 ----------
@@ -602,5 +779,6 @@ jQuery(async () => {
     loadHistory();
     buildButton();
     buildSettingsPanel();
+    hookSendEvents();
     startWatching();
 });
