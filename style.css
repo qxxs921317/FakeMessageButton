@@ -1,4 +1,6 @@
-#fakemsg-btn {
+#fakemsg-btn,
+#fakemsg-send-btn,
+#fakemsg-recover-btn {
     display: flex;
     align-items: center;
     justify-content: center;
@@ -12,16 +14,22 @@
     transition: opacity 0.15s ease, background 0.15s ease, width 0.1s ease, height 0.1s ease;
 }
 
-#fakemsg-btn:hover {
+#fakemsg-btn:hover,
+#fakemsg-send-btn:hover,
+#fakemsg-recover-btn:hover {
     opacity: 1;
     background: rgba(255, 255, 255, 0.08);
 }
 
-#fakemsg-btn:active {
+#fakemsg-btn:active,
+#fakemsg-send-btn:active,
+#fakemsg-recover-btn:active {
     transform: scale(0.92);
 }
 
-#fakemsg-btn #fakemsg-icon {
+#fakemsg-btn #fakemsg-icon,
+#fakemsg-send-btn #fakemsg-send-icon,
+#fakemsg-recover-btn #fakemsg-recover-icon {
     font-size: 0.85em;
     line-height: 1;
     filter: drop-shadow(0 0 2px rgba(0, 0, 0, 0.35));
@@ -41,4 +49,9 @@
     display: block;
     margin-top: 10px;
     opacity: 0.75;
+}
+
+.fakemsg-settings-block .fakemsg-count {
+    opacity: 0.75;
+    margin-right: 8px;
 }
