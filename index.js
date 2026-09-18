@@ -19,6 +19,8 @@ const DEFAULT_CONFIG = {
     iconMarginRight: 6,
     clearInput: true,   // 삽입 후 입력창 비우기
 
+    showFakeButton: true,
+
     // 심플 전송 (유저 메시지로만 삽입, AI 응답 없음)
     showSendButton: true,
     sendEmoji: "📨",
@@ -229,9 +231,9 @@ function getNextRecoverable(currentInput = "") {
     return null;
 }
 
-function recoverInput() {
+function recoverInput(pickIndex) {
     const ta = document.getElementById("send_textarea");
-    if (!ta) return;
+    if (!ta) return null;
 
     // 순환을 "시작"할 때만 현재 입력을 보존한다.
     // 연타 중에 매번 넣으면 기록이 오염되고 순환 위치가 리셋돼 2개만 왕복하게 됨.
@@ -240,10 +242,22 @@ function recoverInput() {
         cycleActive = true;
     }
 
-    const next = getNextRecoverable(ta.value ?? "");
+    let next;
+    if (Number.isInteger(pickIndex)) {
+        // 1-based 번호로 직접 지정
+        const item = history[pickIndex - 1];
+        if (!item) {
+            toastr?.warning?.(`${pickIndex}번 기록이 없어요. (총 ${history.length}개)`, "주작버튼");
+            return null;
+        }
+        next = { item, idx: pickIndex - 1 };
+        cycleIndex = pickIndex % history.length;
+    } else {
+        next = getNextRecoverable(ta.value ?? "");
+    }
     if (!next) {
         toastr?.info?.("복구할 기록이 없어요.", "주작버튼");
-        return;
+        return null;
     }
 
     suppressSnapshot = true;   // 폴링이 이 값을 다시 집어넣지 않도록
@@ -254,6 +268,17 @@ function recoverInput() {
 
     const tag = next.item.s ? " · 전송됨" : "";
     toastr?.success?.(`인풋 복구 (${next.idx + 1}/${history.length}${tag})`, "주작버튼");
+    return next.item.t;
+}
+
+/** 기록 목록을 사람이 읽을 수 있는 문자열로 */
+function formatHistoryList(max = 20) {
+    if (!history.length) return "(기록 없음)";
+    return history.slice(0, max).map((h, i) => {
+        const head = h.t.replace(/\s+/g, " ").slice(0, 40);
+        const more = h.t.length > 40 ? "…" : "";
+        return `${i + 1}. ${h.s ? "[전송됨] " : ""}${head}${more}`;
+    }).join("\n");
 }
 
 // ---------- 입력창 감시 ----------
@@ -360,9 +385,12 @@ async function pushMessage(message, isUser) {
     }
 }
 
-function readInput() {
+function readInput(override) {
     const $textarea = $("#send_textarea");
-    const text = String($textarea.val() || "").trim();
+    const fromInput = override === undefined || override === null || override === "";
+    const text = fromInput
+        ? String($textarea.val() || "").trim()
+        : String(override).trim();
     if (!text) {
         toastr?.info?.("입력창에 내용을 먼저 써주세요.", "주작버튼");
         return null;
@@ -372,7 +400,7 @@ function readInput() {
         toastr?.warning?.("채팅을 먼저 열어주세요.", "주작버튼");
         return null;
     }
-    return { $textarea, text, context };
+    return { $textarea, text, context, fromInput };
 }
 
 function clearInputIfNeeded($textarea) {
@@ -387,13 +415,13 @@ function clearInputIfNeeded($textarea) {
 
 // ---------- 캐릭터 메시지 삽입 (주작) ----------
 
-async function injectCharacterMessage() {
+async function injectCharacterMessage(override) {
     try {
-        const parsed = readInput();
-        if (!parsed) return;
-        const { $textarea, text, context } = parsed;
+        const parsed = readInput(override);
+        if (!parsed) return null;
+        const { $textarea, text, context, fromInput } = parsed;
 
-        snapshotNow(); // 비우기 전에 기록
+        if (fromInput) snapshotNow(); // 비우기 전에 기록
 
         const { charName, avatar } = getCharacterInfo(context);
 
@@ -422,12 +450,14 @@ async function injectCharacterMessage() {
 
         await pushMessage(message, false);
         markAsSent(text);
-        clearInputIfNeeded($textarea);
+        if (fromInput) clearInputIfNeeded($textarea);
 
         console.log(`[주작버튼] 캐릭터 메시지 삽입됨 (${charName}, len=${text.length})`);
+        return charName;
     } catch (e) {
         console.error("[주작버튼] 삽입 실패:", e);
         toastr?.error?.("삽입에 실패했어요. 콘솔을 확인해주세요.", "주작버튼");
+        return null;
     }
 }
 
@@ -435,15 +465,15 @@ async function injectCharacterMessage() {
 
 let isSending = false;
 
-async function simpleSend() {
-    if (isSending) return;
+async function simpleSend(override) {
+    if (isSending) return null;
     isSending = true;
     try {
-        const parsed = readInput();
-        if (!parsed) return;
-        const { $textarea, text, context } = parsed;
+        const parsed = readInput(override);
+        if (!parsed) return null;
+        const { $textarea, text, context, fromInput } = parsed;
 
-        snapshotNow(); // 비우기 전에 기록
+        if (fromInput) snapshotNow(); // 비우기 전에 기록
 
         const now = new Date().toISOString();
         const message = {
@@ -456,12 +486,14 @@ async function simpleSend() {
         };
 
         await pushMessage(message, true);
-        clearInputIfNeeded($textarea);
+        if (fromInput) clearInputIfNeeded($textarea);
 
         console.log(`[주작버튼] 유저 메시지 삽입됨 (len=${text.length})`);
+        return text;
     } catch (e) {
         console.error("[주작버튼] 심플 전송 실패:", e);
         toastr?.error?.("전송에 실패했어요. 콘솔을 확인해주세요.", "주작버튼");
+        return null;
     } finally {
         isSending = false;
     }
@@ -502,11 +534,12 @@ function applyButtonStyle() {
         marginRight: `${config.iconMarginRight}px`,
     });
 
+    $(`#${BTN_ID}`).toggle(!!config.showFakeButton);
     $(`#${SEND_BTN_ID}`).toggle(!!config.showSendButton);
     $(`#${RECOVER_BTN_ID}`).toggle(!!config.showRecoverButton);
 
     // 설정 패널 미리보기도 같이 갱신
-    $("#fakemsg-preview-fake").text(config.emoji);
+    $("#fakemsg-preview-fake").text(config.emoji).toggle(!!config.showFakeButton);
     $("#fakemsg-preview-send").text(config.sendEmoji).toggle(!!config.showSendButton);
     $("#fakemsg-preview-recover").text(config.recoverEmoji).toggle(!!config.showRecoverButton);
     $("#fakemsg-preview .fm-preview-btn").css({
@@ -594,7 +627,7 @@ function buildSettingsPanel() {
                     <div class="fm-row">
                         <span class="fm-label">주작<small>캐릭터 메시지로 삽입</small></span>
                         <input id="fakemsg-emoji-input" class="text_pole fm-emoji" type="text" maxlength="10" value="${config.emoji}">
-                        <span class="fm-always" title="항상 표시됩니다">●</span>
+                        ${sw("fakemsg-show-fake", config.showFakeButton)}
                     </div>
 
                     <div class="fm-row">
@@ -669,6 +702,7 @@ function buildSettingsPanel() {
                     <summary>사용법</summary>
                     <p>입력창은 0.5초마다 자동 스냅샷돼서 <b>그냥 타이핑한 내용도 기록</b>되고, 다른 확장이 입력창을 덮어써도 직전 값이 남습니다.</p>
                     <p>기록은 브라우저에 저장되어 <b>새로고침해도 유지</b>돼요. 복구 버튼을 연타하면 기록 전체를 한 바퀴 순환합니다.</p>
+                    <p>버튼을 다 꺼도 슬래시 명령어로 쓸 수 있어요 — <code>/fake</code> <code>/fakeuser</code> <code>/recover</code> <code>/recoverlist</code></p>
                     <p>뱃지의 <b>미전송 + 전송됨</b> 숫자는 각각 아직 채팅에 안 들어간 입력과 이미 들어간 입력의 개수예요.</p>
                 </details>
 
@@ -741,6 +775,7 @@ function buildSettingsPanel() {
             applyButtonStyle();
         });
     };
+    bindCheck("#fakemsg-show-fake", "showFakeButton");
     bindCheck("#fakemsg-clear-input", "clearInput");
     bindCheck("#fakemsg-show-send", "showSendButton");
     bindCheck("#fakemsg-show-recover", "showRecoverButton");
@@ -773,6 +808,77 @@ function refreshPolicyDesc() {
     $("#fakemsg-policy-desc").text(desc[getConfig().sentPolicy] || "");
 }
 
+// ---------- 슬래시 명령어 ----------
+// 버튼을 전부 숨겨도 명령어만으로 모든 기능을 쓸 수 있게 등록한다.
+// 신형 SlashCommandParser 를 먼저 시도하고, 없으면 구형 registerSlashCommand 로 폴백.
+
+async function registerSlashCommands() {
+    const handlers = {
+        fake: async (_args, value) => (await injectCharacterMessage(value)) ?? "",
+        fakeuser: async (_args, value) => (await simpleSend(value)) ?? "",
+        recover: (_args, value) => {
+            const n = parseInt(String(value ?? "").trim(), 10);
+            return recoverInput(Number.isInteger(n) ? n : undefined) ?? "";
+        },
+        recoverlist: () => formatHistoryList(),
+    };
+
+    const help = {
+        fake: "입력창(또는 인자로 준 텍스트)을 캐릭터 메시지로 채팅에 삽입합니다. 예: <code>/fake 그가 문을 열었다.</code>",
+        fakeuser: "입력창(또는 인자로 준 텍스트)을 유저 메시지로만 삽입합니다. AI 응답은 생성하지 않습니다. 예: <code>/fakeuser 안녕</code>",
+        recover: "이전에 쓰던 입력을 되살립니다. 인자 없이 쓰면 기록을 순환하고, 번호를 주면 그 번호를 바로 불러옵니다. 예: <code>/recover 3</code>",
+        recoverlist: "저장된 인풋 기록 목록을 반환합니다. 예: <code>/recoverlist | /echo</code>",
+    };
+
+    try {
+        const [parserMod, cmdMod, argMod] = await Promise.all([
+            import("../../../slash-commands/SlashCommandParser.js"),
+            import("../../../slash-commands/SlashCommand.js"),
+            import("../../../slash-commands/SlashCommandArgument.js"),
+        ]);
+        const { SlashCommandParser } = parserMod;
+        const { SlashCommand } = cmdMod;
+        const { SlashCommandArgument, ARGUMENT_TYPE } = argMod;
+
+        const textArg = (desc) => SlashCommandArgument.fromProps({
+            description: desc,
+            typeList: [ARGUMENT_TYPE.STRING],
+            isRequired: false,
+        });
+
+        const defs = [
+            ["fake", "삽입한 캐릭터 이름", textArg("삽입할 내용 (생략하면 입력창 내용)")],
+            ["fakeuser", "삽입한 내용", textArg("삽입할 내용 (생략하면 입력창 내용)")],
+            ["recover", "복구된 내용", textArg("기록 번호 (생략하면 순환)")],
+            ["recoverlist", "기록 목록", null],
+        ];
+
+        for (const [name, returns, arg] of defs) {
+            SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+                name,
+                callback: handlers[name],
+                returns,
+                unnamedArgumentList: arg ? [arg] : [],
+                helpString: help[name],
+            }));
+        }
+        console.log("[주작버튼] 슬래시 명령어 등록 완료 (신형)");
+        return;
+    } catch (e) {
+        console.warn("[주작버튼] 신형 슬래시 명령어 등록 실패, 구형 방식 시도:", e);
+    }
+
+    try {
+        const { registerSlashCommand } = await import("../../../slash-commands.js");
+        for (const name of Object.keys(handlers)) {
+            registerSlashCommand(name, handlers[name], [], help[name], true, true);
+        }
+        console.log("[주작버튼] 슬래시 명령어 등록 완료 (구형)");
+    } catch (e) {
+        console.warn("[주작버튼] 슬래시 명령어 등록 실패:", e);
+    }
+}
+
 // ---------- 초기화 ----------
 
 jQuery(async () => {
@@ -781,4 +887,5 @@ jQuery(async () => {
     buildSettingsPanel();
     hookSendEvents();
     startWatching();
+    registerSlashCommands();
 });
