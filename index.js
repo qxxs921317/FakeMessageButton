@@ -331,6 +331,19 @@ function openHistoryViewer() {
 
     const $modal = $("#fakemsg-history-modal");
 
+    // 모바일: 입력창에 포커스가 남아 있으면 가상 키보드가 뜬 채로 화면이 줄어들어
+    // 모달이 위로 밀려 잘린다. 열 때 포커스를 떼고 키보드를 내린다.
+    try {
+        document.activeElement?.blur?.();
+    } catch (e) { /* noop */ }
+
+    // 가상 키보드/주소창으로 실제 보이는 높이가 바뀌면 그에 맞춰 다시 맞춘다.
+    syncModalViewport();
+    if (window.visualViewport) {
+        window.visualViewport.addEventListener("resize", syncModalViewport);
+        window.visualViewport.addEventListener("scroll", syncModalViewport);
+    }
+
     $modal.on("click", function (e) {
         if (e.target === this) closeHistoryViewer();
     });
@@ -376,6 +389,24 @@ function openHistoryViewer() {
 function closeHistoryViewer() {
     $("#fakemsg-history-modal").remove();
     $(document).off("keydown.fakemsgModal");
+    if (window.visualViewport) {
+        window.visualViewport.removeEventListener("resize", syncModalViewport);
+        window.visualViewport.removeEventListener("scroll", syncModalViewport);
+    }
+}
+
+/** 보이는 영역(visualViewport)에 모달을 정확히 맞춘다 — 안드로이드 키보드 대응 */
+function syncModalViewport() {
+    const el = document.getElementById("fakemsg-history-modal");
+    if (!el) return;
+
+    const vv = window.visualViewport;
+    if (!vv) return;
+
+    el.style.height = `${vv.height}px`;
+    el.style.top = `${vv.offsetTop}px`;
+    el.style.left = `${vv.offsetLeft}px`;
+    el.style.width = `${vv.width}px`;
 }
 
 // ---------- 입력창 감시 ----------

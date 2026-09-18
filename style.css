@@ -357,12 +357,21 @@
 
 .fm-modal-overlay {
     position: fixed;
-    inset: 0;
-    z-index: 10000;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100vh;
+    height: 100dvh;   /* 주소창/키보드로 줄어드는 실제 화면 높이 */
+    z-index: 100000;
+    /* align-items: center 로 가운데 정렬하면 내용이 넘칠 때 위쪽이 잘려서
+       스크롤로도 닿을 수 없게 됨 → flex-start + margin:auto 조합으로 해결 */
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     justify-content: center;
-    padding: 20px;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    padding: 16px;
+    box-sizing: border-box;
     background: rgba(0, 0, 0, 0.55);
     backdrop-filter: blur(2px);
 }
@@ -371,7 +380,8 @@
     --fm-accent: var(--SmartThemeQuoteColor, #8bb8ff);
     width: 100%;
     max-width: 520px;
-    max-height: 78vh;
+    max-height: 100%;
+    margin: auto;      /* 세로 가운데 정렬 + 넘칠 땐 위아래 다 스크롤됨 */
     display: flex;
     flex-direction: column;
     border-radius: 12px;
@@ -379,6 +389,11 @@
     background: var(--SmartThemeBlurTintColor, #1b1b1f);
     box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
     overflow: hidden;
+}
+
+.fm-modal-head,
+.fm-modal-hint {
+    flex: 0 0 auto;
 }
 
 .fm-modal-head {
@@ -417,7 +432,11 @@
 }
 
 .fm-modal-list {
+    flex: 1 1 auto;
+    min-height: 0;     /* 이게 없으면 flex 자식이 안 줄어들어 스크롤이 안 생김 */
     overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
     padding: 8px;
 }
 
@@ -506,9 +525,6 @@
 @media (max-width: 500px) {
     .fm-modal-overlay {
         padding: 10px;
-    }
-    .fm-modal-overlay .fm-modal {
-        max-height: 85vh;
     }
     .fm-modal-del {
         opacity: 0.35;
