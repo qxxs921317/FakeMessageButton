@@ -350,3 +350,167 @@
     border-radius: 4px;
     background: rgba(255, 255, 255, 0.08);
 }
+
+/* ==========================================================
+   인풋 기록 뷰어
+   ========================================================== */
+
+.fm-modal-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 10000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    background: rgba(0, 0, 0, 0.55);
+    backdrop-filter: blur(2px);
+}
+
+.fm-modal-overlay .fm-modal {
+    --fm-accent: var(--SmartThemeQuoteColor, #8bb8ff);
+    width: 100%;
+    max-width: 520px;
+    max-height: 78vh;
+    display: flex;
+    flex-direction: column;
+    border-radius: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    background: var(--SmartThemeBlurTintColor, #1b1b1f);
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+    overflow: hidden;
+}
+
+.fm-modal-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 14px;
+    font-weight: 600;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.10);
+}
+
+.fm-modal-count {
+    margin-left: auto;
+    padding: 1px 9px;
+    border-radius: 999px;
+    font-size: 0.78em;
+    font-weight: 600;
+    background: var(--fm-accent);
+    color: #111;
+}
+
+.fm-modal-close {
+    cursor: pointer;
+    opacity: 0.6;
+    padding: 0 2px;
+}
+
+.fm-modal-close:hover {
+    opacity: 1;
+}
+
+.fm-modal-hint {
+    padding: 8px 14px 0;
+    font-size: 0.78em;
+    opacity: 0.5;
+}
+
+.fm-modal-list {
+    overflow-y: auto;
+    padding: 8px;
+}
+
+.fm-modal-empty {
+    padding: 28px 10px;
+    text-align: center;
+    opacity: 0.45;
+    font-size: 0.9em;
+}
+
+.fm-modal-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 9px 10px;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background 0.12s ease;
+}
+
+.fm-modal-item:hover {
+    background: rgba(255, 255, 255, 0.06);
+}
+
+.fm-modal-item + .fm-modal-item {
+    border-top: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.fm-modal-num {
+    flex: 0 0 22px;
+    text-align: center;
+    font-size: 0.8em;
+    opacity: 0.45;
+    padding-top: 2px;
+}
+
+.fm-modal-body {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.fm-modal-meta {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 3px;
+}
+
+.fm-modal-tag {
+    font-size: 0.68em;
+    padding: 1px 6px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.12);
+    opacity: 0.7;
+}
+
+.fm-modal-len {
+    font-size: 0.7em;
+    opacity: 0.4;
+}
+
+.fm-modal-text {
+    font-size: 0.86em;
+    line-height: 1.5;
+    opacity: 0.85;
+    word-break: break-word;
+}
+
+.fm-modal-del {
+    flex: 0 0 auto;
+    padding: 2px 4px;
+    opacity: 0;
+    font-size: 0.8em;
+    transition: opacity 0.12s ease, color 0.12s ease;
+}
+
+.fm-modal-item:hover .fm-modal-del {
+    opacity: 0.45;
+}
+
+.fm-modal-del:hover {
+    opacity: 1 !important;
+    color: #ff8a8a;
+}
+
+@media (max-width: 500px) {
+    .fm-modal-overlay {
+        padding: 10px;
+    }
+    .fm-modal-overlay .fm-modal {
+        max-height: 85vh;
+    }
+    .fm-modal-del {
+        opacity: 0.35;
+    }
+}

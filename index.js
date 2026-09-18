@@ -281,6 +281,103 @@ function formatHistoryList(max = 20) {
     }).join("\n");
 }
 
+// ---------- 기록 목록 뷰어 ----------
+
+function escapeHtml(str) {
+    return String(str)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+}
+
+function renderHistoryRows() {
+    if (!history.length) {
+        return `<div class="fm-modal-empty">저장된 기록이 없어요.</div>`;
+    }
+    return history.map((h, i) => {
+        const preview = escapeHtml(h.t.replace(/\s+/g, " ").slice(0, 120));
+        const more = h.t.length > 120 ? "…" : "";
+        const sent = h.s ? `<span class="fm-modal-tag">전송됨</span>` : "";
+        return `
+        <div class="fm-modal-item" data-idx="${i}">
+            <div class="fm-modal-num">${i + 1}</div>
+            <div class="fm-modal-body">
+                <div class="fm-modal-meta">${sent}<span class="fm-modal-len">${h.t.length}자</span></div>
+                <div class="fm-modal-text">${preview}${more}</div>
+            </div>
+            <div class="fm-modal-del" data-del="${i}" title="이 기록 삭제">✕</div>
+        </div>`;
+    }).join("");
+}
+
+function openHistoryViewer() {
+    closeHistoryViewer();
+
+    const html = `
+    <div id="fakemsg-history-modal" class="fm-modal-overlay">
+        <div class="fm-modal">
+            <div class="fm-modal-head">
+                <span>인풋 기록</span>
+                <span class="fm-modal-count">${history.length}개</span>
+                <span class="fm-modal-close" title="닫기">✕</span>
+            </div>
+            <div class="fm-modal-hint">항목을 누르면 입력창에 불러옵니다.</div>
+            <div class="fm-modal-list">${renderHistoryRows()}</div>
+        </div>
+    </div>`;
+
+    $("body").append(html);
+
+    const $modal = $("#fakemsg-history-modal");
+
+    $modal.on("click", function (e) {
+        if (e.target === this) closeHistoryViewer();
+    });
+    $modal.find(".fm-modal-close").on("click", closeHistoryViewer);
+
+    $modal.on("click", ".fm-modal-del", function (e) {
+        e.stopPropagation();
+        const idx = parseInt($(this).data("del"), 10);
+        if (!Number.isInteger(idx) || !history[idx]) return;
+        history.splice(idx, 1);
+        cycleIndex = 0;
+        cycleActive = false;
+        flushHistory();
+        refreshHistoryCount();
+        $modal.find(".fm-modal-list").html(renderHistoryRows());
+        $modal.find(".fm-modal-count").text(`${history.length}개`);
+    });
+
+    $modal.on("click", ".fm-modal-item", function () {
+        const idx = parseInt($(this).data("idx"), 10);
+        const item = history[idx];
+        if (!item) return;
+        const ta = document.getElementById("send_textarea");
+        if (!ta) return;
+
+        suppressSnapshot = true;
+        cycleActive = false;
+        cycleIndex = (idx + 1) % history.length;
+        ta.value = item.t;
+        ta.dispatchEvent(new Event("input", { bubbles: true }));
+        lastValue = item.t;
+        stableTicks = 0;
+
+        closeHistoryViewer();
+        toastr?.success?.(`${idx + 1}번 기록을 불러왔어요.`, "주작버튼");
+    });
+
+    $(document).on("keydown.fakemsgModal", function (e) {
+        if (e.key === "Escape") closeHistoryViewer();
+    });
+}
+
+function closeHistoryViewer() {
+    $("#fakemsg-history-modal").remove();
+    $(document).off("keydown.fakemsgModal");
+}
+
 // ---------- 입력창 감시 ----------
 
 /**
@@ -694,6 +791,7 @@ function buildSettingsPanel() {
                     </div>
 
                     <div class="fm-row fm-row-end">
+                        <input id="fakemsg-view-history" class="menu_button" type="button" value="기록 보기">
                         <input id="fakemsg-clear-history" class="menu_button fm-danger" type="button" value="기록 비우기">
                     </div>
                 </div>
@@ -787,12 +885,15 @@ function buildSettingsPanel() {
         refreshPolicyDesc();
     });
 
+    $("#fakemsg-view-history").on("click", openHistoryViewer);
+
     $("#fakemsg-clear-history").on("click", function () {
         history = [];
         cycleIndex = 0;
         cycleActive = false;
         flushHistory();
         refreshHistoryCount();
+        closeHistoryViewer();
         toastr?.info?.("인풋 기록을 비웠어요.", "주작버튼");
     });
 
@@ -820,14 +921,17 @@ async function registerSlashCommands() {
             const n = parseInt(String(value ?? "").trim(), 10);
             return recoverInput(Number.isInteger(n) ? n : undefined) ?? "";
         },
-        recoverlist: () => formatHistoryList(),
+        recoverlist: () => {
+            openHistoryViewer();
+            return formatHistoryList();
+        },
     };
 
     const help = {
         fake: "입력창(또는 인자로 준 텍스트)을 캐릭터 메시지로 채팅에 삽입합니다. 예: <code>/fake 그가 문을 열었다.</code>",
         fakeuser: "입력창(또는 인자로 준 텍스트)을 유저 메시지로만 삽입합니다. AI 응답은 생성하지 않습니다. 예: <code>/fakeuser 안녕</code>",
         recover: "이전에 쓰던 입력을 되살립니다. 인자 없이 쓰면 기록을 순환하고, 번호를 주면 그 번호를 바로 불러옵니다. 예: <code>/recover 3</code>",
-        recoverlist: "저장된 인풋 기록 목록을 반환합니다. 예: <code>/recoverlist | /echo</code>",
+        recoverlist: "저장된 인풋 기록 목록을 창으로 띄웁니다. 항목을 누르면 입력창에 불러옵니다. 목록 텍스트도 반환하므로 <code>/recoverlist | /echo</code> 처럼 이어 쓸 수 있습니다.",
     };
 
     try {
