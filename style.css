@@ -524,8 +524,48 @@
 
 @media (max-width: 500px) {
     .fm-modal-overlay {
-        padding: 10px;
+        padding: 24px 16px;
     }
+
+    .fm-modal-overlay .fm-modal {
+        width: 92%;
+        max-height: 68%;   /* 화면을 꽉 채우지 않게 */
+        border-radius: 14px;
+    }
+
+    .fm-modal-head {
+        padding: 10px 12px;
+        font-size: 0.95em;
+    }
+
+    .fm-modal-hint {
+        padding: 6px 12px 0;
+        font-size: 0.72em;
+    }
+
+    .fm-modal-list {
+        padding: 6px;
+    }
+
+    .fm-modal-item {
+        padding: 7px 8px;
+        gap: 8px;
+    }
+
+    .fm-modal-text {
+        font-size: 0.8em;
+        line-height: 1.45;
+        display: -webkit-box;
+        -webkit-line-clamp: 3;   /* 한 항목이 3줄 넘게 차지하지 않도록 */
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+    }
+
+    .fm-modal-num {
+        flex: 0 0 18px;
+        font-size: 0.72em;
+    }
+
     .fm-modal-del {
         opacity: 0.35;
     }
